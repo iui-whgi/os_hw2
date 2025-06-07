@@ -104,68 +104,76 @@ int load_process(FILE *fp, process *proc) {
 void simulate(process *procs, int proc_count) {
     printf("simulate() start\n");
 
-    int total_refs = 0, total_faults = 0;
-    int max_ref_len = 0;
+    int total_references_to_process = 0;
     for (int i = 0; i < proc_count; i++) {
-        if (procs[i].ref_len > max_ref_len)
-            max_ref_len = procs[i].ref_len;
+        total_references_to_process += procs[i].ref_len;
     }
 
-    for (int step = 0; step < max_ref_len; step++) {
+    int processed_refs = 0;
+    while (processed_refs < total_references_to_process) {
         for (int i = 0; i < proc_count; i++) {
-            process *proc = &procs[i];
-            if (step >= proc->ref_len) continue;
+            if (procs[i].ref_count < procs[i].ref_len) {
+                int page_num = procs[i].references[procs[i].ref_count];
+                pte *pte_entry = &procs[i].page_table[page_num];
 
-            unsigned char vpage = proc->references[step];
-            pte *entry = &proc->page_table[vpage];
+                printf("[PID %02d IDX:%03d] %03d Page access: ", procs[i].pid, procs[i].ref_count, page_num);
 
-            printf("[PID %02d IDX:%03d] %03d Page access: ", proc->pid, step, vpage);
-
-            if (entry->vflag == PAGE_INVALID) {
-                int frame = allocate_frame();
-                if (frame == -1) {
-                    printf("Out of memory!\n");
-                    exit(1);
+                if (pte_entry->vflag == PAGE_INVALID) {
+                    int frame = allocate_frame();
+                    if (frame == -1) {
+                        printf("Out of memory!!\n");
+                        printf("simulate() end\n");
+                        return;
+                    }
+                    pte_entry->frame = frame;
+                    pte_entry->vflag = PAGE_VALID;
+                    pte_entry->ref = 1;
+                    printf("PF -> Allocated Frame %03d\n", frame);
+                    procs[i].page_faults++;
+                } else {
+                    pte_entry->ref++;
+                    printf("Frame %03d\n", pte_entry->frame);
                 }
-                entry->frame = frame;
-                entry->vflag = PAGE_VALID;
-                entry->ref = 1;
-                printf("PF -> Allocated Frame %03d\n", frame);
-                proc->page_faults++;
-                total_faults++;
-            } else {
-                entry->ref++;
-                printf("Frame %03d\n", entry->frame);
+                procs[i].ref_count++;
+                processed_refs++;
             }
-
-            proc->ref_count++;
-            total_refs++;
         }
     }
-
     printf("simulate() end\n");
-
-    // 총 통계 출력
-    printf("Total: Allocated Frames=%03d Page Faults/References=%03d/%03d\n",
-           allocated_frame_count, total_faults, total_refs);
 }
 
 
 // print_page_tables() 수정
 void print_page_tables(process *procs, int proc_count) {
+    int total_page_faults = 0;
+    int total_references = 0;
+
     for (int i = 0; i < proc_count; i++) {
         process *proc = &procs[i];
-        printf("** Process %03d: PageFaults/References=%03d/%03d\n",
-               proc->pid, proc->page_faults, proc->ref_count);
+        
+        int proc_allocated_frames = PAGETABLE_FRAMES;
+        for (int p = 0; p < VAS_PAGES; p++) {
+            if (proc->page_table[p].vflag == PAGE_VALID) {
+                proc_allocated_frames++;
+            }
+        }
+
+        printf("** Process %03d: Allocated Frames=%03d PageFaults/References=%03d/%03d\n",
+               proc->pid, proc_allocated_frames, proc->page_faults, proc->ref_count);
+
         for (int p = 0; p < VAS_PAGES; p++) {
             if (proc->page_table[p].vflag == PAGE_VALID) {
                 printf("[PAGE] %03d -> [FRAME] %03d REF=%03d\n",
                        p, proc->page_table[p].frame, proc->page_table[p].ref);
             }
         }
+        total_page_faults += proc->page_faults;
+        total_references += proc->ref_count;
     }
-}
 
+    printf("Total: Allocated Frames=%03d Page Faults/References=%03d/%03d\n",
+           allocated_frame_count, total_page_faults, total_references);
+}
 
 
 
