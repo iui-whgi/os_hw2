@@ -100,25 +100,75 @@ int load_process(FILE *fp, process *proc) {
 // 각 프로세스가 자신의 참조 배열을 순서대로 접근하며,
 // 페이지 폴트 발생 시 프레임을 할당하고, 이미 할당된 경우 참조 횟수만 증가시킨다.
 // 모든 프로세스의 참조가 끝날 때까지 반복한다.
+// simulate() 수정: 1-level page table 기준
 void simulate(process *procs, int proc_count) {
-
     printf("simulate() start\n");
 
-    // 여기에 코드 작성
+    int total_refs = 0, total_faults = 0;
+    int max_ref_len = 0;
+    for (int i = 0; i < proc_count; i++) {
+        if (procs[i].ref_len > max_ref_len)
+            max_ref_len = procs[i].ref_len;
+    }
 
+    for (int step = 0; step < max_ref_len; step++) {
+        for (int i = 0; i < proc_count; i++) {
+            process *proc = &procs[i];
+            if (step >= proc->ref_len) continue;
+
+            unsigned char vpage = proc->references[step];
+            pte *entry = &proc->page_table[vpage];
+
+            printf("[PID %02d IDX:%03d] %03d Page access: ", proc->pid, step, vpage);
+
+            if (entry->vflag == PAGE_INVALID) {
+                int frame = allocate_frame();
+                if (frame == -1) {
+                    printf("Out of memory!\n");
+                    exit(1);
+                }
+                entry->frame = frame;
+                entry->vflag = PAGE_VALID;
+                entry->ref = 1;
+                printf("PF -> Allocated Frame %03d\n", frame);
+                proc->page_faults++;
+                total_faults++;
+            } else {
+                entry->ref++;
+                printf("Frame %03d\n", entry->frame);
+            }
+
+            proc->ref_count++;
+            total_refs++;
+        }
+    }
 
     printf("simulate() end\n");
+
+    // 총 통계 출력
+    printf("Total: Allocated Frames=%03d Page Faults/References=%03d/%03d\n",
+           allocated_frame_count, total_faults, total_refs);
 }
 
-// 각 프로세스의 페이지 테이블 상태와 통계를 출력한다.
-// 페이지 폴트, 총 참조 횟수, 각 페이지별 프레임 매핑 및 참조 횟수를 보여준다.
+
+// print_page_tables() 수정
 void print_page_tables(process *procs, int proc_count) {
-
-
-
-
-
+    for (int i = 0; i < proc_count; i++) {
+        process *proc = &procs[i];
+        printf("** Process %03d: PageFaults/References=%03d/%03d\n",
+               proc->pid, proc->page_faults, proc->ref_count);
+        for (int p = 0; p < VAS_PAGES; p++) {
+            if (proc->page_table[p].vflag == PAGE_VALID) {
+                printf("[PAGE] %03d -> [FRAME] %03d REF=%03d\n",
+                       p, proc->page_table[p].frame, proc->page_table[p].ref);
+            }
+        }
+    }
 }
+
+
+
+
 
 // 메인 함수: 표준 입력에서 프로세스 정보를 읽고, 시뮬레이션을 수행한 뒤 결과를 출력한다.
 // 1) 프로세스 정보 입력
